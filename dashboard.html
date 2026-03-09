@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🏸 Badminton Checker — London</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --accent: #6ee7b7;
+      --accent2: #818cf8;
+      --warn: #fbbf24;
+      --danger: #f87171;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    header h1 span { color: var(--accent); }
+    header p {
+      color: var(--muted);
+      margin-top: 0.4rem;
+      font-size: 0.95rem;
+    }
+
+    #last-updated {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid #2d3251;
+      border-radius: 999px;
+      padding: 0.3rem 1rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-top: 0.8rem;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 0.75rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+
+    button {
+      cursor: pointer;
+      border: none;
+      font-size: 0.9rem;
+      border-radius: 999px;
+      padding: 0.55rem 1.4rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+
+    #refresh-btn {
+      background: var(--accent);
+      color: #0f1117;
+    }
+    #refresh-btn:hover { filter: brightness(1.1); }
+    #refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .filter-btn {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid #2d3251;
+    }
+    .filter-btn.active {
+      background: var(--accent2);
+      color: #fff;
+      border-color: var(--accent2);
+    }
+
+    .venues-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    .venue-card {
+      background: var(--surface);
+      border: 1px solid #2d3251;
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: transform 0.2s;
+    }
+    .venue-card:hover { transform: translateY(-2px); }
+
+    .venue-header {
+      padding: 1.1rem 1.4rem 0.9rem;
+      border-bottom: 1px solid #2d3251;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+
+    .venue-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+    }
+    .venue-address {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.15rem;
+    }
+
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 0.25rem 0.7rem;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .badge-bewell { background: #1e3a5f; color: #60a5fa; }
+    .badge-better { background: #1e3a2f; color: var(--accent); }
+
+    .venue-body { padding: 1rem 1.4rem 1.4rem; }
+
+    .slots-count {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 0.8rem;
+    }
+    .slots-count strong { color: var(--accent); }
+
+    .slot-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .slot-item {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 0.65rem 0.9rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.88rem;
+    }
+
+    .slot-left { display: flex; flex-direction: column; gap: 0.1rem; }
+    .slot-date { font-weight: 600; color: var(--accent2); }
+    .slot-time { color: var(--text); font-size: 0.85rem; max-width: 220px; }
+    .slot-spaces { font-size: 0.75rem; color: var(--muted); }
+
+    .slot-book {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--bg);
+      background: var(--accent);
+      border-radius: 999px;
+      padding: 0.3rem 0.85rem;
+      text-decoration: none;
+      flex-shrink: 0;
+      transition: filter 0.15s;
+    }
+    .slot-book:hover { filter: brightness(1.1); }
+
+    .no-slots {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+      padding: 1.5rem 0.5rem;
+    }
+    .no-slots a {
+      display: inline-block;
+      margin-top: 0.6rem;
+      font-size: 0.82rem;
+      color: var(--accent2);
+    }
+
+    .loading {
+      text-align: center;
+      padding: 4rem;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid #2d3251;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto 1rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-box {
+      background: #2d1b1b;
+      border: 1px solid #7f1d1d;
+      border-radius: var(--radius);
+      padding: 1.2rem 1.5rem;
+      color: var(--danger);
+      text-align: center;
+      max-width: 600px;
+      margin: 2rem auto;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    footer a { color: var(--accent2); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏸 <span>Badminton</span> Availability</h1>
+  <p>Whitechapel · Mile End · Walthamstow</p>
+  <div id="last-updated">Not yet loaded</div>
+</header>
+
+<div class="controls">
+  <button id="refresh-btn" onclick="loadData()">⟳ Refresh</button>
+  <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">All Venues</button>
+  <button class="filter-btn" data-filter="whitechapel" onclick="setFilter('whitechapel', this)">Whitechapel</button>
+  <button class="filter-btn" data-filter="mile_end" onclick="setFilter('mile_end', this)">Mile End</button>
+  <button class="filter-btn" data-filter="walthamstow" onclick="setFilter('walthamstow', this)">Walthamstow</button>
+</div>
+
+<div id="app">
+  <div class="loading">
+    <div class="spinner"></div>
+    Loading availability data…
+  </div>
+</div>
+
+<footer>
+  Data from <a href="https://be-well.org.uk/book/" target="_blank">Be Well</a> &amp;
+  <a href="https://www.better.org.uk" target="_blank">Better (GLL)</a> ·
+  Run <code>python scraper.py</code> to refresh · Check venues' sites for live accuracy
+</footer>
+
+<script>
+  let allData = null;
+  let activeFilter = 'all';
+
+  async function loadData() {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true;
+    btn.textContent = '⟳ Loading…';
+
+    try {
+      // Load from the JSON file the scraper writes
+      const resp = await fetch('data/availability.json?t=' + Date.now());
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} — have you run scraper.py?`);
+      allData = await resp.json();
+      render();
+    } catch (err) {
+      document.getElementById('app').innerHTML = `
+        <div class="error-box">
+          <strong>Could not load data</strong><br/><br/>
+          ${err.message}<br/><br/>
+          Run <code>python scraper.py</code> first, then refresh this page.<br/>
+          Or open with a local server: <code>python -m http.server 8000</code>
+        </div>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '⟳ Refresh';
+    }
+  }
+
+  function setFilter(f, el) {
+    activeFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    render();
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr || dateStr === 'See site' || dateStr === 'Live') return dateStr;
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    } catch { return dateStr; }
+  }
+
+  function render() {
+    if (!allData) return;
+
+    const ts = new Date(allData.last_updated);
+    document.getElementById('last-updated').textContent =
+      '🕐 Last checked: ' + ts.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+
+    const venues = allData.venues.filter(v =>
+      activeFilter === 'all' || v.id === activeFilter
+    );
+
+    const html = `<div class="venues-grid">${venues.map(venueCard).join('')}</div>`;
+    document.getElementById('app').innerHTML = html;
+  }
+
+  function venueCard(venue) {
+    const badgeClass = venue.system === 'bewell' ? 'badge-bewell' : 'badge-better';
+    const badgeLabel = venue.system === 'bewell' ? 'Be Well' : 'Better GLL';
+
+    const slotsHtml = venue.slots.length
+      ? `<div class="slot-list">${venue.slots.map(slotRow).join('')}</div>`
+      : `<div class="no-slots">
+          No available slots found in the next 7 days.<br/>
+          <a href="${venue.booking_url}" target="_blank">Check directly on the booking site →</a>
+        </div>`;
+
+    return `
+      <div class="venue-card">
+        <div class="venue-header">
+          <div>
+            <div class="venue-name">${venue.name}</div>
+            <div class="venue-address">📍 ${venue.address}</div>
+          </div>
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
+        </div>
+        <div class="venue-body">
+          <div class="slots-count">
+            <strong>${venue.slots.length}</strong> slot${venue.slots.length !== 1 ? 's' : ''} found
+          </div>
+          ${slotsHtml}
+        </div>
+      </div>`;
+  }
+
+  function slotRow(slot) {
+    return `
+      <div class="slot-item">
+        <div class="slot-left">
+          <span class="slot-date">${formatDate(slot.date)}</span>
+          <span class="slot-time">${slot.time}</span>
+          <span class="slot-spaces">${slot.spaces}</span>
+        </div>
+        <a class="slot-book" href="${slot.book_url}" target="_blank">Book →</a>
+      </div>`;
+  }
+
+  // Auto-load on page open
+  loadData();
+</script>
+</body>
+</html>
