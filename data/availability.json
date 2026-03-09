@@ -1,0 +1,49 @@
+{
+  "last_updated": "2026-03-09T22:26:06.594593",
+  "venues": [
+    {
+      "id": "whitechapel",
+      "name": "Whitechapel Sports Centre",
+      "address": "Durward Street, Whitechapel, E1 5BA",
+      "booking_url": "https://be-well.org.uk/book/",
+      "system": "bewell",
+      "slots_found": 1,
+      "slots": [
+        {
+          "date": "Live",
+          "time": "Check the Be Well website for live badminton slots",
+          "spaces": "Unknown \u2014 site uses dynamic booking",
+          "book_url": "https://be-well.org.uk/book/"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "id": "mile_end",
+      "name": "Mile End Leisure Centre",
+      "address": "190 Mile End Road, Tower Hamlets, E1 4AJ",
+      "booking_url": "https://be-well.org.uk/book/",
+      "system": "bewell",
+      "slots_found": 1,
+      "slots": [
+        {
+          "date": "Live",
+          "time": "Check the Be Well website for live badminton slots",
+          "spaces": "Unknown \u2014 site uses dynamic booking",
+          "book_url": "https://be-well.org.uk/book/"
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "id": "walthamstow",
+      "name": "Walthamstow Leisure Centre",
+      "address": "Markhouse Road, Walthamstow, E17 8BD",
+      "booking_url": "https://bookings.better.org.uk/location/walthamstow-leisure-centre/badminton-40-mins/",
+      "system": "better",
+      "slots_found": 0,
+      "slots": [],
+      "status": "no_slots"
+    }
+  ]
+}
