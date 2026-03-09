@@ -1,177 +1,216 @@
 """
 Badminton Availability Checker
-Checks: Whitechapel Sports Centre & Mile End (Be Well) + Walthamstow (Better/GLL)
-Saves results to data/availability.json for the dashboard to read.
+Hits the GladstoneGo API directly for Be Well venues (no login needed)
+and scrapes Better for Walthamstow.
 """
 
 import json
-import os
-import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
-from bs4 import BeautifulSoup
 
 OUTPUT_FILE = Path("data/availability.json")
 OUTPUT_FILE.parent.mkdir(exist_ok=True)
 
+GLADSTONE_BASE = "https://towerhamletscouncil.gladstonego.cloud"
+GLADSTONE_SESSIONS = f"{GLADSTONE_BASE}/api/availability/V2/sessions"
+
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15",
+    "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-GB,en;q=0.9",
+    "Referer": f"{GLADSTONE_BASE}/book",
+    "X-Use-Sso": "1",
 }
 
 VENUES = [
     {
         "id": "whitechapel",
         "name": "Whitechapel Sports Centre",
-        "system": "bewell",
-        "url": "https://be-well.org.uk/centres/whitechapel-sports-centre/",
-        "booking_url": "https://be-well.org.uk/book/",
+        "system": "gladstone",
         "address": "Durward Street, Whitechapel, E1 5BA",
+        "info_url": "https://be-well.org.uk/centres/whitechapel-sports-centre/",
+        "booking_url": f"{GLADSTONE_BASE}/book",
+        "activities": [
+            {"id": "WACT000010", "label": "40 min", "site": "WSC"},
+            {"id": "WACT000011", "label": "60 min", "site": "WSC"},
+        ],
     },
     {
         "id": "mile_end",
         "name": "Mile End Leisure Centre",
-        "system": "bewell",
-        "url": "https://be-well.org.uk/centres/mile-end-leisure-centre-and-stadium/",
-        "booking_url": "https://be-well.org.uk/book/",
+        "system": "gladstone",
         "address": "190 Mile End Road, Tower Hamlets, E1 4AJ",
+        "info_url": "https://be-well.org.uk/centres/mile-end-leisure-centre-and-stadium/",
+        "booking_url": f"{GLADSTONE_BASE}/book",
+        "activities": [
+            {"id": "MACT000009,MACT000010", "label": "40 min", "site": "MEPLS"},
+            {"id": "MACT000011", "label": "60 min", "site": "MEPLS"},
+        ],
     },
     {
         "id": "walthamstow",
         "name": "Walthamstow Leisure Centre",
         "system": "better",
-        "url": "https://www.better.org.uk/leisure-centre/london/waltham-forest/walthamstow-leisure-centre/badminton",
-        "booking_url": "https://bookings.better.org.uk/location/walthamstow-leisure-centre/badminton-40-mins/",
         "address": "Markhouse Road, Walthamstow, E17 8BD",
+        "info_url": "https://www.better.org.uk/leisure-centre/london/waltham-forest/walthamstow-leisure-centre",
+        "booking_url": "https://bookings.better.org.uk/location/walthamstow-leisure-centre/",
+        "activities": [
+            {"slug": "badminton-40-mins", "label": "40 min"},
+            {"slug": "badminton-60-mins", "label": "60 min"},
+        ],
     },
 ]
 
 
 # ---------------------------------------------------------------------------
-# Better (GLL / Walthamstow) scraper
+# GladstoneGo API scraper (Whitechapel & Mile End)
 # ---------------------------------------------------------------------------
 
-def scrape_better(venue: dict, days_ahead: int = 7) -> list[dict]:
-    """
-    Scrape the Better booking page for available badminton slots.
-    Better uses a calendar-style page at:
-      https://bookings.better.org.uk/location/<slug>/<activity>/<YYYY-MM-DD>/by-time
-    """
+def get_gladstone_jwt():
+    """Fetch an anonymous JWT token from the GladstoneGo site — no login needed."""
+    try:
+        resp = requests.get(
+            f"{GLADSTONE_BASE}/api/login/anonymous",
+            headers=HEADERS,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("access_token") or data.get("token") or data.get("jwt")
+    except Exception as exc:
+        print(f"  [WARN] Could not fetch anonymous JWT: {exc}")
+    return None
+
+
+def scrape_gladstone(venue: dict, days_ahead: int = 7) -> list[dict]:
     slots = []
-    base = venue["booking_url"].rstrip("/")
+    date_from = datetime.now().strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-    for day_offset in range(days_ahead):
-        date = (datetime.now() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
-        url = f"{base}/{date}/by-time"
+    # Try to get a fresh anonymous JWT; fall back to no auth header
+    jwt = get_gladstone_jwt()
+    headers = {**HEADERS}
+    if jwt:
+        headers["Cookie"] = f"Jwt={jwt}"
+
+    for activity in venue["activities"]:
+        params = {
+            "webBookableOnly": "true",
+            "siteIds": activity["site"],
+            "activityIds": activity["id"],
+            "dateFrom": date_from,
+        }
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
+            resp = requests.get(
+                GLADSTONE_SESSIONS,
+                params=params,
+                headers=headers,
+                timeout=15,
+            )
             if resp.status_code != 200:
+                print(f"  [WARN] Gladstone API returned {resp.status_code} for {activity['label']}")
                 continue
-            soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Better renders slots as <li> or <div> elements with class containing 'slot'
-            # They may also appear as data in a <script> tag — we try both
-            slot_elements = soup.select("[class*='slot']:not([class*='slot-picker'])")
-            if not slot_elements:
-                slot_elements = soup.select(".activity-card, .session-card, li.bookable")
+            data = resp.json()
+            # Response is a list of session objects
+            sessions = data if isinstance(data, list) else data.get("data", data.get("sessions", []))
 
-            for el in slot_elements:
-                time_el = el.select_one("time, .time, [class*='time']")
-                avail_el = el.select_one("[class*='available'], [class*='space'], [class*='remaining']")
-                booked_class = any(
-                    c in el.get("class", []) for c in ["full", "booked", "unavailable", "sold-out"]
-                )
-                if booked_class:
+            for session in sessions:
+                # Parse start time
+                start_raw = session.get("startTime") or session.get("startDateTime") or session.get("start", "")
+                if not start_raw:
                     continue
 
-                time_str = time_el.get_text(strip=True) if time_el else "See site"
-                avail_str = avail_el.get_text(strip=True) if avail_el else "Available"
+                try:
+                    start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                    # Only include sessions within days_ahead
+                    if start_dt.date() > (datetime.now().date() + timedelta(days=days_ahead)):
+                        continue
+                    date_str = start_dt.strftime("%Y-%m-%d")
+                    time_str = start_dt.strftime("%H:%M")
+                except Exception:
+                    date_str = "See site"
+                    time_str = start_raw[:16]
+
+                # Spaces / availability
+                spaces = session.get("spaces", session.get("availableSpaces", session.get("spacesAvailable", "")))
+                if spaces == "" or spaces is None:
+                    spaces_str = "Available"
+                elif int(spaces) == 0:
+                    continue  # skip full sessions
+                else:
+                    spaces_str = f"{spaces} space{'s' if int(spaces) != 1 else ''}"
 
                 slots.append({
-                    "date": date,
+                    "date": date_str,
+                    "duration": activity["label"],
                     "time": time_str,
-                    "spaces": avail_str,
-                    "book_url": url,
+                    "spaces": spaces_str,
+                    "book_url": venue["booking_url"],
                 })
 
-            # Rate-limit courtesy
-            time.sleep(1)
+            time.sleep(0.5)
 
-        except requests.RequestException as exc:
-            print(f"  [WARN] Better request failed for {date}: {exc}")
+        except Exception as exc:
+            print(f"  [ERROR] Gladstone scrape failed for {activity['label']}: {exc}")
 
+    # Sort by date then time
+    slots.sort(key=lambda s: (s["date"], s["time"]))
     return slots
 
 
 # ---------------------------------------------------------------------------
-# Be Well (Tower Hamlets – Whitechapel & Mile End) scraper
+# Better (GLL) scraper — Walthamstow
 # ---------------------------------------------------------------------------
 
-def scrape_bewell(venue: dict, days_ahead: int = 7) -> list[dict]:
-    """
-    Be Well uses a booking system embedded via an iframe or redirect.
-    We fetch their timetable/book page and look for badminton sessions.
-    """
+from bs4 import BeautifulSoup
+
+BETTER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
+
+def scrape_better(venue: dict, days_ahead: int = 7) -> list[dict]:
     slots = []
+    base = venue["booking_url"].rstrip("/")
 
-    # Be Well embeds a third-party booking widget (often Gladstone/Legend).
-    # We try their /book/ page filtered to badminton.
-    booking_urls = [
-        f"https://be-well.org.uk/book/?location={venue['id'].replace('_', '-')}&activity=badminton",
-        "https://be-well.org.uk/book/",
-    ]
-
-    for url in booking_urls:
-        try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-            soup = BeautifulSoup(resp.text, "html.parser")
-
-            # Look for an iframe src — the real booking calendar is often inside
-            iframe = soup.find("iframe")
-            if iframe and iframe.get("src"):
-                iframe_url = iframe["src"]
-                if not iframe_url.startswith("http"):
-                    iframe_url = "https://be-well.org.uk" + iframe_url
-                resp2 = requests.get(iframe_url, headers=HEADERS, timeout=15)
-                soup = BeautifulSoup(resp2.text, "html.parser")
-
-            # Parse any session rows that mention badminton
-            rows = soup.find_all(
-                lambda tag: tag.name in ["tr", "li", "div"]
-                and "badminton" in tag.get_text(strip=True).lower()
-            )
-
-            for row in rows:
-                text = row.get_text(" ", strip=True)
-                # Skip if it says fully booked / no spaces
-                if any(w in text.lower() for w in ["full", "no spaces", "sold out"]):
+    for activity in venue["activities"]:
+        slug = activity["slug"]
+        for day_offset in range(days_ahead):
+            date = (datetime.now() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            url = f"{base}/{slug}/{date}/by-time"
+            try:
+                resp = requests.get(url, headers=BETTER_HEADERS, timeout=15)
+                if resp.status_code != 200:
                     continue
-                slots.append({
-                    "date": "See site",
-                    "time": text[:120],
-                    "spaces": "Check site",
-                    "book_url": url,
-                })
-            break  # got something, stop trying fallback URLs
-        except requests.RequestException as exc:
-            print(f"  [WARN] Be Well request failed: {exc}")
+                soup = BeautifulSoup(resp.text, "html.parser")
+                slot_elements = (
+                    soup.select("[class*='slot']:not([class*='slot-picker'])")
+                    or soup.select(".activity-card, .session-card, li.bookable")
+                )
+                for el in slot_elements:
+                    booked = any(
+                        c in " ".join(el.get("class", [])).lower()
+                        for c in ["full", "booked", "unavailable", "sold-out"]
+                    )
+                    if booked:
+                        continue
+                    time_el = el.select_one("time, .time, [class*='time']")
+                    avail_el = el.select_one("[class*='available'], [class*='space'], [class*='remaining']")
+                    slots.append({
+                        "date": date,
+                        "duration": activity["label"],
+                        "time": time_el.get_text(strip=True) if time_el else "See site",
+                        "spaces": avail_el.get_text(strip=True) if avail_el else "Available",
+                        "book_url": url,
+                    })
+                time.sleep(0.8)
+            except Exception as exc:
+                print(f"  [WARN] Better {date} ({activity['label']}): {exc}")
 
-    # If we found nothing from HTML scraping, return an info slot directing user to site
-    if not slots:
-        slots.append({
-            "date": "Live",
-            "time": "Check the Be Well website for live badminton slots",
-            "spaces": "Unknown — site uses dynamic booking",
-            "book_url": venue["booking_url"],
-        })
-
+    slots.sort(key=lambda s: (s["date"], s["time"]))
     return slots
 
 
@@ -180,43 +219,42 @@ def scrape_bewell(venue: dict, days_ahead: int = 7) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def check_all_venues() -> dict:
-    results = {
-        "last_updated": datetime.now().isoformat(),
-        "venues": [],
-    }
+    results = {"last_updated": datetime.now().isoformat(), "venues": []}
 
     for venue in VENUES:
         print(f"Checking {venue['name']}...")
         try:
-            if venue["system"] == "better":
-                slots = scrape_better(venue)
+            if venue["system"] == "gladstone":
+                slots = scrape_gladstone(venue)
+                note = "Live data from GladstoneGo API"
             else:
-                slots = scrape_bewell(venue)
+                slots = scrape_better(venue)
+                note = "Live data from Better GLL"
         except Exception as exc:
-            print(f"  [ERROR] {exc}")
             slots = []
+            note = f"Error: {exc}"
 
+        print(f"  -> {len(slots)} slot(s) found")
         results["venues"].append({
             "id": venue["id"],
             "name": venue["name"],
             "address": venue["address"],
-            "booking_url": venue["booking_url"],
             "system": venue["system"],
+            "info_url": venue["info_url"],
+            "booking_url": venue["booking_url"],
+            "note": note,
             "slots_found": len(slots),
             "slots": slots,
-            "status": "ok" if slots else "no_slots",
         })
-        print(f"  → {len(slots)} slot(s) found")
 
     return results
 
 
 def main():
-    print(f"\n🏸 Badminton Availability Check — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+    print(f"\n Badminton Check - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
     data = check_all_venues()
     OUTPUT_FILE.write_text(json.dumps(data, indent=2))
-    print(f"\n✅ Results saved to {OUTPUT_FILE}")
-    return data
+    print(f"\nDone. Saved to {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
